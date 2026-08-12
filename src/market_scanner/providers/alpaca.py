@@ -9,10 +9,18 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from market_scanner.models import Bar, Catalyst, MarketSnapshot, Quote, ScanConfig
+from market_scanner.models import (
+    Bar,
+    Catalyst,
+    ExplosiveConfig,
+    MarketSnapshot,
+    Quote,
+    ScanConfig,
+)
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -31,6 +39,7 @@ class AlpacaProvider:
         self.feed = feed
         self.timeout = timeout
         self.base_url = "https://data.alpaca.markets"
+        self.trading_url = "https://api.alpaca.markets"
         self._earnings_warning: str | None = None
         if not self.key_id or not self.secret:
             raise ProviderError(
@@ -42,8 +51,75 @@ class AlpacaProvider:
     ) -> tuple[list[MarketSnapshot], list[str]]:
         return await asyncio.to_thread(self._get_snapshots_sync, symbols, as_of, config)
 
+    async def discover_symbols(self) -> list[str]:
+        """Return active tradable US equities for broad explosive-mover discovery."""
+        return await asyncio.to_thread(self._discover_symbols_sync)
+
+    def _discover_symbols_sync(self) -> list[str]:
+        assets = self._get_url(f"{self.trading_url}/v2/assets?status=active&asset_class=us_equity")
+        exchanges = {"NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"}
+        return sorted(
+            asset["symbol"]
+            for asset in assets
+            if asset.get("tradable")
+            and asset.get("status") == "active"
+            and asset.get("exchange") in exchanges
+            and isinstance(asset.get("symbol"), str)
+        )
+
+    async def get_explosive_snapshots(
+        self, symbols: list[str], as_of: datetime, config: ExplosiveConfig
+    ) -> tuple[list[MarketSnapshot], list[str]]:
+        return await asyncio.to_thread(self._get_explosive_snapshots_sync, symbols, as_of, config)
+
+    def _get_explosive_snapshots_sync(
+        self, symbols: list[str], as_of: datetime, config: ExplosiveConfig
+    ) -> tuple[list[MarketSnapshot], list[str]]:
+        clean_symbols = list(dict.fromkeys(symbol.upper() for symbol in symbols if symbol))
+        if len(clean_symbols) > config.shortlist_limit:
+            snapshots = self._bulk_snapshots(clean_symbols)
+            preliminary: list[tuple[float, str]] = []
+            for symbol, snapshot in snapshots.items():
+                trade = snapshot.get("latestTrade") or {}
+                minute = snapshot.get("minuteBar") or {}
+                previous = snapshot.get("prevDailyBar") or {}
+                price = float(trade.get("p") or minute.get("c") or 0)
+                previous_close = float(previous.get("c") or 0)
+                if not price or not previous_close:
+                    continue
+                gap_pct = (price / previous_close - 1) * 100
+                if config.min_price <= price <= config.max_price and gap_pct >= config.min_gap_pct:
+                    preliminary.append((gap_pct, symbol))
+            preliminary.sort(reverse=True)
+            shortlisted = [symbol for _, symbol in preliminary[: config.shortlist_limit]]
+        else:
+            shortlisted = clean_symbols
+        if not shortlisted:
+            return [], [
+                f"Broad prefilter found 0 candidates across {len(clean_symbols):,} active symbols."
+            ]
+        results, warnings = self._get_snapshots_sync(shortlisted, as_of, config)
+        profiles = self._profiles(shortlisted)
+        enriched = [
+            replace(
+                snapshot,
+                shares_outstanding=profiles.get(snapshot.symbol, {}).get("shares_outstanding"),
+                market_cap=profiles.get(snapshot.symbol, {}).get("market_cap"),
+            )
+            for snapshot in results
+        ]
+        warnings.append(
+            f"Broad prefilter reduced {len(clean_symbols):,} symbols to "
+            f"{len(shortlisted):,} gap/price candidates before history requests."
+        )
+        if not self.finnhub_key:
+            warnings.append(
+                "Share-count filter is advisory: FINNHUB_API_KEY is not configured; verify float."
+            )
+        return enriched, warnings
+
     def _get_snapshots_sync(
-        self, symbols: list[str], as_of: datetime, config: ScanConfig
+        self, symbols: list[str], as_of: datetime, config: ScanConfig | ExplosiveConfig
     ) -> tuple[list[MarketSnapshot], list[str]]:
         clean_symbols = list(dict.fromkeys(symbol.upper() for symbol in symbols if symbol))
         requested = list(dict.fromkeys([*clean_symbols, "SPY"]))
@@ -110,6 +186,7 @@ class AlpacaProvider:
             today = as_of.astimezone(EASTERN).date()
             current_volume = volumes.pop(today, 0)
             prior_volumes = tuple(value for _, value in sorted(volumes.items())[-20:])
+            premarket_high, premarket_low = _current_premarket_range(minutes.get(symbol, []), as_of)
             catalysts = [*news.get(symbol, []), *earnings.get(symbol, [])]
             results.append(
                 MarketSnapshot(
@@ -122,6 +199,8 @@ class AlpacaProvider:
                     historical_premarket_volumes=prior_volumes,
                     catalysts=tuple(catalysts),
                     data_as_of=max(quote_time, _parse_time(minute_row.get("t") or end)),
+                    premarket_high=premarket_high,
+                    premarket_low=premarket_low,
                 )
             )
         if len(results) < len(clean_symbols):
@@ -143,6 +222,9 @@ class AlpacaProvider:
 
     def _get(self, path: str, params: dict[str, str]) -> dict:
         url = f"{self.base_url}{path}?{urllib.parse.urlencode(params)}"
+        return self._get_url(url, path=path)
+
+    def _get_url(self, url: str, *, path: str = "/v2/assets"):
         request = urllib.request.Request(
             url,
             headers={
@@ -164,6 +246,18 @@ class AlpacaProvider:
                 f"Alpaca request failed at {path}: {type(error).__name__}"
             ) from error
 
+    def _bulk_snapshots(self, symbols: list[str], chunk_size: int = 150) -> dict:
+        combined: dict = {}
+        for offset in range(0, len(symbols), chunk_size):
+            chunk = symbols[offset : offset + chunk_size]
+            combined.update(
+                self._get(
+                    "/v2/stocks/snapshots",
+                    {"symbols": ",".join(chunk), "feed": self.feed},
+                )
+            )
+        return combined
+
     def _paged(self, path: str, params: dict[str, str], field: str) -> dict[str, list[dict]]:
         combined: dict[str, list[dict]] = defaultdict(list)
         page_token: str | None = None
@@ -179,28 +273,33 @@ class AlpacaProvider:
                 return dict(combined)
 
     def _news(self, symbols: list[str], as_of: datetime) -> dict[str, list[Catalyst]]:
-        payload = self._get(
-            "/v1beta1/news",
-            {
-                "symbols": ",".join(symbols),
-                "start": (as_of - timedelta(days=3)).date().isoformat(),
-                "end": as_of.date().isoformat(),
-                "limit": "50",
-                "sort": "desc",
-            },
-        )
         result: dict[str, list[Catalyst]] = defaultdict(list)
-        for item in payload.get("news", []):
-            for symbol in item.get("symbols", []):
-                if symbol in symbols and len(result[symbol]) < 3:
-                    result[symbol].append(
-                        Catalyst(
-                            "news",
-                            str(item.get("headline", "News catalyst")),
-                            _parse_time(item["created_at"]) if item.get("created_at") else None,
-                            item.get("url"),
+        symbol_set = set(symbols)
+        # Chunking prevents one news-heavy ticker from consuming the result cap
+        # for an entire explosive-mode shortlist.
+        for offset in range(0, len(symbols), 10):
+            chunk = symbols[offset : offset + 10]
+            payload = self._get(
+                "/v1beta1/news",
+                {
+                    "symbols": ",".join(chunk),
+                    "start": (as_of - timedelta(days=3)).date().isoformat(),
+                    "end": as_of.date().isoformat(),
+                    "limit": "50",
+                    "sort": "desc",
+                },
+            )
+            for item in payload.get("news", []):
+                for symbol in item.get("symbols", []):
+                    if symbol in symbol_set and len(result[symbol]) < 3:
+                        result[symbol].append(
+                            Catalyst(
+                                "news",
+                                str(item.get("headline", "News catalyst")),
+                                _parse_time(item["created_at"]) if item.get("created_at") else None,
+                                item.get("url"),
+                            )
                         )
-                    )
         return dict(result)
 
     def _earnings(self, as_of: datetime) -> dict[str, list[Catalyst]]:
@@ -227,6 +326,30 @@ class AlpacaProvider:
                     Catalyst("earnings", f"Earnings scheduled {item.get('date', 'date unknown')}")
                 )
         return dict(result)
+
+    def _profiles(self, symbols: list[str]) -> dict[str, dict[str, float | int]]:
+        if not self.finnhub_key:
+            return {}
+        result: dict[str, dict[str, float | int]] = {}
+        for symbol in symbols:
+            url = "https://finnhub.io/api/v1/stock/profile2?" + urllib.parse.urlencode(
+                {"symbol": symbol, "token": self.finnhub_key}
+            )
+            try:
+                with urllib.request.urlopen(url, timeout=self.timeout) as response:
+                    profile = json.load(response)
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+                continue
+            shares_millions = profile.get("shareOutstanding")
+            market_cap_millions = profile.get("marketCapitalization")
+            values: dict[str, float | int] = {}
+            if shares_millions:
+                values["shares_outstanding"] = int(float(shares_millions) * 1_000_000)
+            if market_cap_millions:
+                values["market_cap"] = float(market_cap_millions) * 1_000_000
+            if values:
+                result[symbol] = values
+        return result
 
 
 def _parse_time(value: str) -> datetime:
@@ -261,3 +384,25 @@ def _same_window_volumes(rows: list[dict], as_of: datetime) -> dict[date, int]:
         if time(4, 0) <= local_time <= cutoff and timestamp.weekday() < 5:
             result[timestamp.date()] += int(row.get("v", 0))
     return dict(result)
+
+
+def _current_premarket_range(
+    rows: list[dict], as_of: datetime
+) -> tuple[float | None, float | None]:
+    local_date = as_of.astimezone(EASTERN).date()
+    cutoff = as_of.astimezone(EASTERN).time().replace(tzinfo=None, second=0, microsecond=0)
+    cutoff = min(cutoff, time(9, 29))
+    current = []
+    for row in rows:
+        timestamp = _parse_time(row["t"]).astimezone(EASTERN)
+        local_time = timestamp.time().replace(tzinfo=None)
+        if (
+            timestamp.date() == local_date
+            and time(4, 0) <= local_time <= cutoff
+            and row.get("h") is not None
+            and row.get("l") is not None
+        ):
+            current.append(row)
+    if not current:
+        return None, None
+    return max(float(row["h"]) for row in current), min(float(row["l"]) for row in current)

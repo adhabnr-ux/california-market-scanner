@@ -38,9 +38,9 @@ In **Settings → Secrets and variables → Actions**, add:
 
 The workflow does not grant write access to repository contents. It validates
 the two required Alpaca values without printing them, runs the complete test
-suite, performs the scan, and retains `artifacts/` as an Actions run artifact for
-30 days. Artifact access follows the repository's GitHub permissions. Do not
-commit `.env` files or API keys.
+suite, performs both the trend and explosive-mover scans, and retains
+`artifacts/` as an Actions run artifact for 30 days. Artifact access follows the
+repository's GitHub permissions. Do not commit `.env` files or API keys.
 
 ## Manual run
 
@@ -53,6 +53,10 @@ gh workflow run market-scan.yml -f provider=demo
 ```
 
 Download output from the completed run's **Artifacts** section.
+
+Each scheduled/manual run produces `market-scan.*` for the trend strategy and
+`explosive-scan.*` for the PLAG-style event strategy. Demo dispatches validate
+both paths without contacting live providers.
 
 ## Local macOS schedule with launchd
 
@@ -96,5 +100,17 @@ docker run --rm \
   market-scanner
 ```
 
-The image runs as an unprivileged user. Docker does not provide scheduling by
-itself; schedule `docker run` with the host scheduler or use GitHub Actions.
+The image runs the default trend strategy as an unprivileged user. Run the
+explosive strategy by overriding its command:
+
+```bash
+docker run --rm \
+  -e APCA_API_KEY_ID \
+  -e APCA_API_SECRET_KEY \
+  -e FINNHUB_API_KEY \
+  -v "$PWD/artifacts:/app/artifacts" \
+  market-scanner scan --strategy explosive --provider alpaca --output-dir artifacts
+```
+
+Docker does not provide scheduling by itself; schedule `docker run` with the
+host scheduler or use GitHub Actions.

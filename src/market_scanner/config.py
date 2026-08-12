@@ -6,13 +6,15 @@ import os
 import tomllib
 from pathlib import Path
 
-from market_scanner.models import ScanConfig
+from market_scanner.models import ExplosiveConfig, ScanConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_DATA = Path(__file__).with_name("data")
 
 
-def load_config(path: str | Path | None = None) -> tuple[ScanConfig, dict, dict]:
+def load_config(
+    path: str | Path | None = None,
+) -> tuple[ScanConfig, ExplosiveConfig, dict, dict]:
     requested = path or os.environ.get("MARKET_SCANNER_CONFIG")
     if requested:
         config_path = Path(requested)
@@ -30,7 +32,17 @@ def load_config(path: str | Path | None = None) -> tuple[ScanConfig, dict, dict]
     unknown = set(scanner_values) - known
     if unknown:
         raise ValueError(f"Unknown scanner config keys: {', '.join(sorted(unknown))}")
-    return ScanConfig(**scanner_values), payload.get("provider", {}), payload.get("output", {})
+    explosive_values = payload.get("explosive", {})
+    explosive_known = set(ExplosiveConfig.__dataclass_fields__)
+    explosive_unknown = set(explosive_values) - explosive_known
+    if explosive_unknown:
+        raise ValueError(f"Unknown explosive config keys: {', '.join(sorted(explosive_unknown))}")
+    return (
+        ScanConfig(**scanner_values),
+        ExplosiveConfig(**explosive_values),
+        payload.get("provider", {}),
+        payload.get("output", {}),
+    )
 
 
 def load_symbols(path: str | Path | None = None) -> list[str]:
