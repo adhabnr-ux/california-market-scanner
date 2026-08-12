@@ -65,7 +65,7 @@ jobs:
           done
           exit "$missing"
 
-      - name: Run live market scanner
+      - name: Run live trend scanner
         if: github.event_name == 'schedule' || inputs.provider == 'alpaca'
         env:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
@@ -73,9 +73,21 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: market-scanner scan --provider alpaca --output-dir "$MARKET_SCANNER_OUTPUT_DIR"
 
-      - name: Run demo market scanner
+      - name: Run live explosive-mover scanner
+        if: github.event_name == 'schedule' || inputs.provider == 'alpaca'
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: market-scanner scan --strategy explosive --provider alpaca --output-dir "$MARKET_SCANNER_OUTPUT_DIR"
+
+      - name: Run demo trend scanner
         if: github.event_name == 'workflow_dispatch' && inputs.provider == 'demo'
         run: market-scanner scan --provider demo --output-dir "$MARKET_SCANNER_OUTPUT_DIR"
+
+      - name: Run demo explosive-mover scanner
+        if: github.event_name == 'workflow_dispatch' && inputs.provider == 'demo'
+        run: market-scanner scan --strategy explosive --provider demo --output-dir "$MARKET_SCANNER_OUTPUT_DIR"
 
       - name: Upload watchlist and run metadata
         if: always()

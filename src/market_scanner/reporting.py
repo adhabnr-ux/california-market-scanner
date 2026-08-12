@@ -48,6 +48,11 @@ CSV_FIELDS = (
     "beta",
     "spread_percent",
     "gap_percent",
+    "premarket_dollar_volume",
+    "premarket_high",
+    "distance_from_premarket_high_pct",
+    "shares_outstanding",
+    "market_cap",
     "trend",
     "levels",
     "catalysts",
@@ -55,6 +60,8 @@ CSV_FIELDS = (
     "stop",
     "target",
     "risk",
+    "risk_flags",
+    "strategy",
 )
 
 
@@ -188,6 +195,13 @@ def _candidate(value: Any, position: int) -> dict[str, Any]:
         "score": _number(_get(row, "score")),
         "passed_filters": dict(_mapping(_get(row, "passed_filters"))),
         "catalyst_details": list(_get(row, "catalyst_details", default=[]) or []),
+        "strategy": _text(_get(row, "strategy"), "trend"),
+        "premarket_dollar_volume": _number(_get(row, "premarket_dollar_volume")),
+        "premarket_high": _number(_get(row, "premarket_high")),
+        "distance_from_premarket_high_pct": _number(_get(row, "distance_from_premarket_high_pct")),
+        "shares_outstanding": _number(_get(row, "shares_outstanding")),
+        "market_cap": _number(_get(row, "market_cap")),
+        "risk_flags": list(_get(row, "risk_flags", default=[]) or []),
     }
 
 
@@ -256,7 +270,7 @@ def normalize_scan_result(result: Any) -> dict[str, Any]:
         "timezone": _text(_get(root, "timezone", "schedule_timezone"), "America/Los_Angeles"),
         "filters": filters,
         "candidate_count": len(candidates),
-        "target_watchlist_size": "10–15",
+        "target_watchlist_size": "up to 15; never padded",
         "status": "error" if errors else ("empty" if not candidates else "ok"),
         "candidates": candidates,
         "errors": errors,
@@ -265,6 +279,7 @@ def normalize_scan_result(result: Any) -> dict[str, Any]:
         "symbols_scanned": _number(_get(root, "symbols_scanned")),
         "symbols_qualified": _number(_get(root, "symbols_qualified")),
         "rejection_counts": dict(_mapping(_get(root, "rejection_counts"))),
+        "strategy": _text(_get(root, "strategy"), "trend"),
         "disclaimer": DISCLAIMER,
     }
 
@@ -292,6 +307,7 @@ def render_csv(result: Any) -> str:
     for candidate in report["candidates"]:
         row = dict(candidate)
         row["catalysts"] = "; ".join(candidate["catalysts"])
+        row["risk_flags"] = "; ".join(candidate["risk_flags"])
         writer.writerow(row)
     return stream.getvalue()
 
@@ -310,15 +326,16 @@ def render_markdown(result: Any) -> str:
     """Render a concise human-readable morning watchlist."""
 
     report = normalize_scan_result(result)
+    explosive = report["strategy"] == "explosive"
     lines = [
-        "# Morning Market Scanner",
+        "# Explosive Mover Scanner" if explosive else "# Morning Market Scanner",
         "",
         f"> **{report['disclaimer']}**",
         "",
         f"Generated: `{report['generated_at']}`  ",
         f"Freshness: {report['data_freshness']}  ",
         f"Schedule timezone: `{report['timezone']}`  ",
-        f"Watchlist: **{report['candidate_count']} / 10–15 target**",
+        f"Watchlist: **{report['candidate_count']} / up to 15; never padded**",
         "",
         "## Applied filters",
         "",
@@ -334,29 +351,58 @@ def render_markdown(result: Any) -> str:
     if not report["candidates"]:
         lines.extend(["No stocks met every filter. No trade is a valid outcome.", ""])
     else:
-        lines.extend(
-            [
-                "| # | Symbol | Price | Volume | RVOL | ATR | Beta | Spread | Gap | Trend | Levels | Catalysts |",
-                "|---:|:---|---:|---:|---:|---:|---:|---:|---:|:---|:---|:---|",
-            ]
-        )
-        for row in report["candidates"]:
-            lines.append(
-                "| {rank} | **{symbol}** | {price} | {volume} | {rvol} | {atr} | {beta} | {spread} | {gap} | {trend} | {levels} | {catalysts} |".format(
-                    rank=row["rank"],
-                    symbol=_md(row["symbol"]),
-                    price=_display_number(row["price"], prefix="$"),
-                    volume=_display_number(row["volume"], decimals=0),
-                    rvol=_display_number(row["rvol"], suffix="×"),
-                    atr=_display_number(row["atr_percent"], suffix="%"),
-                    beta=_display_number(row["beta"]),
-                    spread=_display_number(row["spread_percent"], suffix="%"),
-                    gap=_display_number(row["gap_percent"], suffix="%"),
-                    trend=_md(row["trend"]),
-                    levels=_md(row["levels"]),
-                    catalysts=_md(row["catalysts"] or ["None supplied"]),
-                )
+        if explosive:
+            lines.extend(
+                [
+                    "| # | Symbol | Price | Gap | PM Volume | PM $ Volume | RVOL | Spread | From PM High | Shares | Catalysts | Risks |",
+                    "|---:|:---|---:|---:|---:|---:|---:|---:|---:|---:|:---|:---|",
+                ]
             )
+            for row in report["candidates"]:
+                lines.append(
+                    "| {rank} | **{symbol}** | {price} | {gap} | {pm_volume} | {dollar_volume} | {rvol} | {spread} | {from_high} | {shares} | {catalysts} | {risks} |".format(
+                        rank=row["rank"],
+                        symbol=_md(row["symbol"]),
+                        price=_display_number(row["price"], prefix="$"),
+                        gap=_display_number(row["gap_percent"], suffix="%"),
+                        pm_volume=_display_number(row["current_volume"], decimals=0),
+                        dollar_volume=_display_number(
+                            row["premarket_dollar_volume"], prefix="$", decimals=0
+                        ),
+                        rvol=_display_number(row["rvol"], suffix="×"),
+                        spread=_display_number(row["spread_percent"], suffix="%"),
+                        from_high=_display_number(
+                            row["distance_from_premarket_high_pct"], suffix="%"
+                        ),
+                        shares=_display_number(row["shares_outstanding"], decimals=0),
+                        catalysts=_md(row["catalysts"] or ["None supplied"]),
+                        risks=_md(row["risk_flags"]),
+                    )
+                )
+        else:
+            lines.extend(
+                [
+                    "| # | Symbol | Price | Volume | RVOL | ATR | Beta | Spread | Gap | Trend | Levels | Catalysts |",
+                    "|---:|:---|---:|---:|---:|---:|---:|---:|---:|:---|:---|:---|",
+                ]
+            )
+            for row in report["candidates"]:
+                lines.append(
+                    "| {rank} | **{symbol}** | {price} | {volume} | {rvol} | {atr} | {beta} | {spread} | {gap} | {trend} | {levels} | {catalysts} |".format(
+                        rank=row["rank"],
+                        symbol=_md(row["symbol"]),
+                        price=_display_number(row["price"], prefix="$"),
+                        volume=_display_number(row["volume"], decimals=0),
+                        rvol=_display_number(row["rvol"], suffix="×"),
+                        atr=_display_number(row["atr_percent"], suffix="%"),
+                        beta=_display_number(row["beta"]),
+                        spread=_display_number(row["spread_percent"], suffix="%"),
+                        gap=_display_number(row["gap_percent"], suffix="%"),
+                        trend=_md(row["trend"]),
+                        levels=_md(row["levels"]),
+                        catalysts=_md(row["catalysts"] or ["None supplied"]),
+                    )
+                )
         lines.extend(["", "## Pre-trade checklist", ""])
         for row in report["candidates"]:
             lines.extend(
@@ -367,6 +413,7 @@ def render_markdown(result: Any) -> str:
                     f"- **Stop:** {_md(row['stop'])}",
                     f"- **Target:** {_md(row['target'])}",
                     f"- **Risk:** {_md(row['risk'])}",
+                    f"- **Risk flags:** {_md(row['risk_flags'])}" if row["risk_flags"] else "",
                     "",
                 ]
             )
@@ -389,6 +436,9 @@ def render_html(result: Any, *, title: str = "Morning Market Scanner") -> str:
     """Render a responsive, self-contained HTML dashboard."""
 
     report = normalize_scan_result(result)
+    explosive = report["strategy"] == "explosive"
+    if explosive and title == "Morning Market Scanner":
+        title = "Explosive Mover Scanner"
     filter_chips = "".join(
         f"<li><span>{_h(key.replace('_', ' ').title())}</span><strong>{_h(value)}</strong></li>"
         for key, value in report["filters"].items()
@@ -413,8 +463,32 @@ def render_html(result: Any, *, title: str = "Morning Market Scanner") -> str:
         badges = "".join(f'<span class="badge">{_h(value)}</span>' for value in row["catalysts"])
         if not badges:
             badges = '<span class="badge muted">None supplied</span>'
-        table_rows.append(
-            f"""
+        risk_badges = "".join(
+            f'<span class="badge risk">{_h(value)}</span>' for value in row["risk_flags"]
+        )
+        if not risk_badges:
+            risk_badges = '<span class="badge muted">No automated flags</span>'
+        if explosive:
+            table_rows.append(
+                f"""
+            <tr>
+              <td data-label="Rank"><span class="rank">{row["rank"]:02d}</span></td>
+              <td data-label="Stock"><strong class="ticker">{_h(row["symbol"])}</strong><small>{_h(row["company"])}</small></td>
+              <td data-label="Price">{_metric(row["price"], prefix="$")}</td>
+              <td data-label="Gap">{_metric(row["gap_percent"], suffix="%")}</td>
+              <td data-label="PM volume">{_metric(row["current_volume"], decimals=0)}</td>
+              <td data-label="PM dollar volume">{_metric(row["premarket_dollar_volume"], prefix="$", decimals=0)}</td>
+              <td data-label="PM RVOL">{_metric(row["rvol"], suffix="×")}</td>
+              <td data-label="Spread">{_metric(row["spread_percent"], suffix="%")}</td>
+              <td data-label="From PM high">{_metric(row["distance_from_premarket_high_pct"], suffix="%")}</td>
+              <td data-label="Shares">{_metric(row["shares_outstanding"], decimals=0)}</td>
+              <td data-label="Catalyst"><div class="badges">{badges}</div></td>
+              <td data-label="Risk flags"><div class="badges">{risk_badges}</div></td>
+            </tr>"""
+            )
+        else:
+            table_rows.append(
+                f"""
             <tr>
               <td data-label="Rank"><span class="rank">{row["rank"]:02d}</span></td>
               <td data-label="Stock"><strong class="ticker">{_h(row["symbol"])}</strong><small>{_h(row["company"])}</small></td>
@@ -428,6 +502,11 @@ def render_html(result: Any, *, title: str = "Morning Market Scanner") -> str:
               <td data-label="Structure"><strong>{_h(row["trend"])}</strong><small>{_h(row["levels"])}</small></td>
               <td data-label="Catalyst"><div class="badges">{badges}</div></td>
             </tr>"""
+            )
+        risk_row = (
+            f"<div><dt>Risk flags</dt><dd>{_h('; '.join(row['risk_flags']))}</dd></div>"
+            if row["risk_flags"]
+            else ""
         )
         checklist_cards.append(
             f"""
@@ -438,15 +517,23 @@ def render_html(result: Any, *, title: str = "Morning Market Scanner") -> str:
                 <div><dt>Stop</dt><dd>{_h(row["stop"])}</dd></div>
                 <div><dt>Target</dt><dd>{_h(row["target"])}</dd></div>
                 <div><dt>Risk</dt><dd>{_h(row["risk"])}</dd></div>
+                {risk_row}
               </dl>
             </article>"""
         )
 
     if table_rows:
+        table_header = (
+            "<th>#</th><th>Stock</th><th>Price</th><th>Gap</th><th>PM volume</th>"
+            "<th>PM $ volume</th><th>PM RVOL</th><th>Spread</th><th>From PM high</th>"
+            "<th>Shares</th><th>Catalyst</th><th>Risk flags</th>"
+            if explosive
+            else '<th>#</th><th>Stock</th><th>Price</th><th title="20-session average daily volume">Volume (ADV)</th><th>RVOL</th><th>ATR</th><th>Beta</th><th>Spread</th><th>Gap</th><th>Structure / levels</th><th>Catalyst</th>'
+        )
         watchlist_content = f"""
         <div class="table-wrap">
           <table>
-            <thead><tr><th>#</th><th>Stock</th><th>Price</th><th title="20-session average daily volume">Volume (ADV)</th><th>RVOL</th><th>ATR</th><th>Beta</th><th>Spread</th><th>Gap</th><th>Structure / levels</th><th>Catalyst</th></tr></thead>
+            <thead><tr>{table_header}</tr></thead>
             <tbody>{"".join(table_rows)}</tbody>
           </table>
         </div>"""
@@ -485,6 +572,7 @@ def render_html(result: Any, *, title: str = "Morning Market Scanner") -> str:
     @media(max-width:680px){{.shell{{width:min(100% - 20px,1520px);padding-top:24px}}.filters{{grid-template-columns:1fr 1fr}}.filters li,.filters li:nth-child(3n){{border-right:1px solid var(--line);border-bottom:1px solid var(--line)}}.filters li:nth-child(2n){{border-right:0}}.filters li:nth-last-child(-n+2){{border-bottom:0}}.trade-grid{{grid-template-columns:1fr}}.section-head{{align-items:start;flex-direction:column;gap:2px}}}}
     @media(prefers-reduced-motion:reduce){{html{{scroll-behavior:auto}}}}
     @media print{{:root{{--bg:#fff;--panel:#fff;--panel2:#fff;--line:#ccd5d2;--text:#101715;--muted:#53605c;--lime:#235f33;--cyan:#126657}}body{{background:#fff}}body:before{{display:none}}.shell{{width:100%;padding:0}}.table-wrap,.meta{{box-shadow:none}}}}
+    .badge.risk{{border-color:#66542e;background:#291f11;color:var(--amber)}}
   </style>
 </head>
 <body>
@@ -495,7 +583,7 @@ def render_html(result: Any, *, title: str = "Morning Market Scanner") -> str:
         <div><span>Generated</span><strong>{_h(report["generated_at"])}</strong></div>
         <div><span>Data freshness</span><strong>{_h(report["data_freshness"])}</strong></div>
         <div><span>Timezone</span><strong>{_h(report["timezone"])}</strong></div>
-        <div><span>Watchlist</span><strong>{report["candidate_count"]} / 10–15 target</strong></div>
+        <div><span>Watchlist</span><strong>{report["candidate_count"]} / up to 15</strong></div>
       </div>
     </header>
     <aside class="disclaimer"><b>RESEARCH ONLY</b><span>{_h(report["disclaimer"])}</span></aside>
@@ -509,7 +597,7 @@ def render_html(result: Any, *, title: str = "Morning Market Scanner") -> str:
       <header class="section-head"><h2 id="checklist-heading">Pre-trade checklist</h2><p>Thesis · stop · target · defined risk</p></header>
       {checklist_content}
     </section>
-    <footer>Generated by Market Scanner · Validate execution data independently · {report["candidate_count"]} qualifying securities</footer>
+    <footer>Generated by Market Scanner · {_h(report["strategy"].title())} strategy · Validate execution data independently · {report["candidate_count"]} qualifying securities</footer>
   </main>
 </body>
 </html>

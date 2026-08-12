@@ -5,7 +5,32 @@ from __future__ import annotations
 import math
 from datetime import UTC, datetime, timedelta
 
-from market_scanner.models import Bar, Catalyst, MarketSnapshot, Quote, ScanConfig
+from market_scanner.models import (
+    Bar,
+    Catalyst,
+    ExplosiveConfig,
+    MarketSnapshot,
+    Quote,
+    ScanConfig,
+)
+
+EXPLOSIVE_DEMO_SYMBOLS = [
+    "PLAG",
+    "EVNT",
+    "GAPX",
+    "NEWS",
+    "RVOL",
+    "FLOT",
+    "MOMO",
+    "HALT",
+    "VOLA",
+    "CATL",
+    "SURG",
+    "PULS",
+    "RIPR",
+    "FIRE",
+    "WAVE",
+]
 
 
 class DemoProvider:
@@ -51,6 +76,47 @@ class DemoProvider:
             "do not trade."
         ]
 
+    async def get_explosive_snapshots(
+        self, symbols: list[str], as_of: datetime, config: ExplosiveConfig
+    ) -> tuple[list[MarketSnapshot], list[str]]:
+        del config
+        benchmark = _bars("SPY", as_of, 96, beta_factor=1.0, base=55)
+        snapshots: list[MarketSnapshot] = []
+        for index, symbol in enumerate(symbols):
+            bars = _event_bars(as_of, base=0.55 + index * 0.23)
+            previous = bars[-1].close
+            gap = 1.25 + (index % 5) * 0.22
+            price = previous * gap
+            spread = price * (0.004 + (index % 3) * 0.001)
+            historical = tuple(8_000 + day * 400 + index * 50 for day in range(12))
+            current = 1_500_000 + index * 125_000
+            snapshots.append(
+                MarketSnapshot(
+                    symbol=symbol,
+                    price=price,
+                    quote=Quote(price - spread / 2, price + spread / 2, as_of),
+                    daily_bars=tuple(bars),
+                    benchmark_bars=tuple(benchmark),
+                    current_premarket_volume=current,
+                    historical_premarket_volumes=historical,
+                    catalysts=(
+                        Catalyst(
+                            "news",
+                            f"Demo fresh commercial catalyst for {symbol}",
+                            as_of - timedelta(hours=1),
+                        ),
+                    ),
+                    data_as_of=as_of,
+                    premarket_high=price * 1.05,
+                    premarket_low=max(previous, price * 0.78),
+                    shares_outstanding=11_000_000 + index * 1_000_000,
+                    market_cap=price * (11_000_000 + index * 1_000_000),
+                )
+            )
+        return snapshots, [
+            "DEMO DATA: synthetic PLAG-style gaps, catalysts, quotes, and volume; do not trade."
+        ]
+
 
 def _bars(
     symbol: str,
@@ -89,3 +155,11 @@ def _bars(
             index += 1
         day += timedelta(days=1)
     return bars
+
+
+def _event_bars(as_of: datetime, *, base: float) -> list[Bar]:
+    bars = _bars("event", as_of, 96, beta_factor=1.2, base=base)
+    return [
+        Bar(bar.timestamp, bar.open, bar.high * 1.04, bar.low * 0.96, bar.close, 85_000)
+        for bar in bars
+    ]

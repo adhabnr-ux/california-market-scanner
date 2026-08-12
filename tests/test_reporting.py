@@ -164,6 +164,44 @@ def test_empty_and_error_states_are_explicit_in_all_human_outputs() -> None:
     assert "verify freshness" in html
 
 
+def test_explosive_reports_show_event_metrics_and_risk_flags() -> None:
+    result = {
+        "strategy": "explosive",
+        "generated_at": "2026-08-11T13:00:00+00:00",
+        "candidates": [
+            {
+                "symbol": "PLAG",
+                "price": 1.27,
+                "gap_percent": 124.5,
+                "current_volume": 12_000_000,
+                "premarket_dollar_volume": 15_240_000,
+                "rvol": 77.2,
+                "spread_percent": 1.1,
+                "distance_from_premarket_high_pct": 3.5,
+                "shares_outstanding": 14_232_714,
+                "catalysts": ["Fresh company announcement"],
+                "risk_flags": ["Review current SEC filings"],
+                "thesis": "Event momentum",
+                "stop": 1.10,
+                "target": 1.61,
+                "risk": "$0.17/share",
+            }
+        ],
+    }
+
+    markdown = render_markdown(result)
+    html = render_html(result)
+    payload = json.loads(render_json(result))
+
+    assert "# Explosive Mover Scanner" in markdown
+    assert "PM $ Volume" in markdown
+    assert "Review current SEC filings" in markdown
+    assert "Explosive Mover Scanner" in html
+    assert "PM dollar volume" in html
+    assert "Risk flags" in html
+    assert payload["candidates"][0]["premarket_dollar_volume"] == 15_240_000
+
+
 def test_write_reports_creates_all_formats(tmp_path) -> None:
     paths = write_reports(sample_result(), tmp_path, basename="2026-08-11")
 

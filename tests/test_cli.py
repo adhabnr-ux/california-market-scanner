@@ -21,3 +21,23 @@ def test_live_cli_fails_closed_without_credentials(monkeypatch, tmp_path: Path) 
     monkeypatch.delenv("APCA_API_SECRET_KEY", raising=False)
     assert main(["scan", "--provider", "alpaca", "--output-dir", str(tmp_path)]) == 2
     assert not list(tmp_path.iterdir())
+
+
+def test_explosive_demo_cli_uses_separate_artifact_names(tmp_path: Path) -> None:
+    code = main(
+        [
+            "scan",
+            "--strategy",
+            "explosive",
+            "--provider",
+            "demo",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert code == 0
+    report = json.loads((tmp_path / "explosive-scan.json").read_text(encoding="utf-8"))
+    assert report["strategy"] == "explosive"
+    assert report["candidate_count"] == 15
+    assert not (tmp_path / "market-scan.json").exists()

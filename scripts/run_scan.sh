@@ -14,6 +14,11 @@ if [[ ! -x "$VENV_DIR/bin/market-scanner" ]]; then
   exit 1
 fi
 
-exec "$VENV_DIR/bin/market-scanner" scan \
+"$VENV_DIR/bin/market-scanner" scan \
+  --provider "${MARKET_SCANNER_PROVIDER:-alpaca}" \
+  --output-dir "$OUTPUT_DIR"
+
+"$VENV_DIR/bin/market-scanner" scan \
+  --strategy explosive \
   --provider "${MARKET_SCANNER_PROVIDER:-alpaca}" \
   --output-dir "$OUTPUT_DIR"

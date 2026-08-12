@@ -4,11 +4,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from market_scanner.models import ScanConfig
+from market_scanner.models import ExplosiveConfig, ScanConfig
 from market_scanner.providers.alpaca import (
     EASTERN,
     AlpacaProvider,
     ProviderError,
+    _current_premarket_range,
     _parse_time,
     _same_window_volumes,
 )
@@ -38,6 +39,76 @@ def test_rvol_windows_align_by_eastern_time() -> None:
     volumes = _same_window_volumes(rows, as_of)
     assert volumes[datetime(2026, 8, 10).date()] == 10
     assert volumes[datetime(2026, 8, 11).date()] == 50
+
+
+def test_premarket_range_uses_only_current_session_and_tolerates_volume_rows() -> None:
+    rows = [
+        {"t": "2026-08-10T12:30:00Z", "h": 99, "l": 1, "v": 10},
+        {"t": "2026-08-11T11:00:00Z", "h": 1.4, "l": 1.1, "v": 20},
+        {"t": "2026-08-11T12:30:00Z", "h": 1.8, "l": 1.3, "v": 30},
+        {"t": "2026-08-11T12:40:00Z", "v": 40},
+        {"t": "2026-08-11T13:01:00Z", "h": 3, "l": 0.5, "v": 50},
+    ]
+
+    assert _current_premarket_range(rows, datetime(2026, 8, 11, 9, 0, tzinfo=EASTERN)) == (
+        1.8,
+        1.1,
+    )
+
+
+def test_active_symbol_discovery_filters_untradable_assets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APCA_API_KEY_ID", "test-key")
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "test-secret")
+    provider = AlpacaProvider()
+    monkeypatch.setattr(
+        provider,
+        "_get_url",
+        lambda _url: [
+            {"symbol": "PLAG", "tradable": True, "status": "active", "exchange": "AMEX"},
+            {"symbol": "OTCX", "tradable": True, "status": "active", "exchange": "OTC"},
+            {"symbol": "HALT", "tradable": False, "status": "active", "exchange": "NASDAQ"},
+        ],
+    )
+
+    assert provider._discover_symbols_sync() == ["PLAG"]
+
+
+def test_broad_explosive_prefilter_shortlists_price_and_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APCA_API_KEY_ID", "test-key")
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "test-secret")
+    provider = AlpacaProvider()
+    symbols = [f"S{index:02d}" for index in range(51)]
+    bulk = {
+        symbol: {
+            "latestTrade": {"p": 1 + index / 10},
+            "prevDailyBar": {"c": 1},
+        }
+        for index, symbol in enumerate(symbols)
+    }
+    requested: list[str] = []
+    monkeypatch.setattr(provider, "_bulk_snapshots", lambda _symbols: bulk)
+
+    def detailed(selected, _as_of, _config):
+        requested.extend(selected)
+        return [], []
+
+    monkeypatch.setattr(provider, "_get_snapshots_sync", detailed)
+    monkeypatch.setattr(provider, "_profiles", lambda _symbols: {})
+
+    _, warnings = provider._get_explosive_snapshots_sync(
+        symbols,
+        datetime(2026, 8, 11, 9, 0, tzinfo=EASTERN),
+        ExplosiveConfig(shortlist_limit=15),
+    )
+
+    assert len(requested) == 15
+    assert requested[0] == "S50"
+    assert all((bulk[symbol]["latestTrade"]["p"] - 1) * 100 >= 20 for symbol in requested)
+    assert any("51 symbols to 15" in warning for warning in warnings)
 
 
 def test_alpaca_adapter_normalizes_batched_payloads(

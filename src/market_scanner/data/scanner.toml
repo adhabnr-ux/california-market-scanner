@@ -21,6 +21,25 @@ name = "alpaca"
 feed = "iex"
 request_timeout_seconds = 30
 
+[explosive]
+min_price = 0.50
+max_price = 20.0
+min_average_volume = 50000
+min_gap_pct = 20.0
+min_premarket_volume = 250000
+min_premarket_dollar_volume = 1000000
+min_rvol = 5.0
+max_spread_pct = 2.0
+max_distance_from_premarket_high_pct = 15.0
+max_shares_outstanding = 50000000
+require_share_data = false
+max_catalyst_age_hours = 24.0
+shortlist_limit = 50
+history_days = 90
+watchlist_size = 15
+risk_per_trade_dollars = 50.0
+reward_to_risk = 2.0
+
 [output]
 directory = "artifacts"
 formats = ["json", "csv", "md", "html"]

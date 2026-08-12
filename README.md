@@ -4,7 +4,9 @@ An evidence-first US equity scanner that builds a focused premarket watchlist at
 **06:00 California time** every weekday. It filters measurable liquidity,
 volatility, relative-volume, spread, and technical-structure criteria; enriches
 survivors with catalysts; then emits JSON, CSV, Markdown, and a polished HTML
-report with a complete pre-trade checklist.
+report with a complete pre-trade checklist. A separate explosive-mover strategy
+finds PLAG-style fresh-catalyst microcap events without weakening the safer
+trend screen.
 
 > **Research only, not investment advice.** A scanner can reduce a universe; it
 > cannot verify a trade for you. Recheck prices, quotes, news, earnings, levels,
@@ -31,6 +33,29 @@ must pass **every hard gate**, including evidence of at least one catalyst
 (recent news, an upcoming earnings event, or a ≥2% gap). Missing optional
 earnings data remains unknown rather than being treated as “no earnings.”
 
+## PLAG-style explosive movers
+
+PLAG's August 11, 2026 move followed a fresh company announcement about entering
+commercial lactoferrin operations. Its sub-$5 starting price and low normal
+volume meant it correctly failed the original trend gates. The new `explosive`
+strategy instead requires a ≥20% gap, ≥250,000 premarket shares, ≥$1 million approximate
+premarket dollar volume, ≥5× same-window premarket RVOL, ≤2% spread, proximity
+to the premarket high, and either verified news no older than 24 hours or an
+upcoming earnings event. Shares outstanding must be ≤50 million when available; unknown
+share data is flagged, not guessed.
+
+Run both strategies:
+
+```bash
+.venv/bin/market-scanner scan --provider alpaca --output-dir artifacts
+.venv/bin/market-scanner scan --strategy explosive --provider alpaca --output-dir artifacts
+```
+
+Live explosive mode discovers Alpaca's active US-equity universe automatically,
+then narrows it before expensive history/news calls. Read the evidence,
+inferences, filing risks, and full filter rationale in
+[`docs/PLAG_CASE_STUDY.md`](docs/PLAG_CASE_STUDY.md).
+
 ## Quick start
 
 Python 3.11+ required.
@@ -51,7 +76,9 @@ No credentials yet? Exercise the complete pipeline deterministically:
 
 ```bash
 .venv/bin/market-scanner scan --provider demo --output-dir artifacts
+.venv/bin/market-scanner scan --strategy explosive --provider demo --output-dir artifacts
 open artifacts/market-scan.html
+open artifacts/explosive-scan.html
 ```
 
 You can override the seed universe:
@@ -69,6 +96,10 @@ Each successful run writes:
 - `artifacts/market-scan.md` — concise human review
 - `artifacts/market-scan.html` — responsive, self-contained dashboard
 
+Explosive mode writes the same four formats under `artifacts/explosive-scan.*`
+and includes gap, premarket volume/dollar volume, same-window RVOL, distance from
+premarket high, share data, catalyst evidence, and risk flags.
+
 Outputs include data timestamps, warnings, applied criteria, raw metrics,
 catalyst evidence, technical levels, and the pre-trade checklist. Provider or
 data failures produce an explicit non-zero exit; they never silently fall back
@@ -76,9 +107,9 @@ from live to demo data.
 
 ## Data and methodology boundaries
 
-- **Universe:** `config/universe.txt` is a curated liquid starting set, not the
-  full US market. Replace or pass `--symbols` for broader coverage. Every symbol
-  still faces the same gates.
+- **Universe:** trend mode uses the curated `config/universe.txt`. Live
+  explosive mode discovers active tradable US equities through Alpaca unless
+  `--symbols` is supplied. Every symbol still faces the same strategy gates.
 - **Alpaca feed:** defaults to IEX for broad account compatibility. IEX quotes
   reflect one venue and may understate consolidated volume or differ from NBBO.
   Use SIP only when your subscription permits it.
@@ -88,8 +119,8 @@ from live to demo data.
 - **Beta:** historical estimate, not a stable property or forecast.
 - **Levels/trend:** deterministic heuristics, not visual certainty. They create
   review candidates, not trade instructions.
-- **Earnings:** optional Finnhub calendar enrichment requires
-  `FINNHUB_API_KEY`. Unknown data remains unknown; it is not rendered as “none.”
+- **Finnhub:** optional `FINNHUB_API_KEY` enriches the earnings calendar and
+  explosive-mode shares outstanding/market cap. Unknown data remains unknown.
 - **Holidays/stale data:** the weekday schedule can run on exchange holidays.
   Check `data_as_of` and warnings before acting.
 
@@ -128,7 +159,7 @@ every push and pull request.
 ```text
 provider (Alpaca/demo)
   → normalized quotes, daily/minute bars, news, earnings
-  → hard eligibility gates
+  → trend gates OR explosive event/liquidity gates
   → technical/catalyst scoring
   → rank + cap (never relax/pad)
   → JSON / CSV / Markdown / HTML
