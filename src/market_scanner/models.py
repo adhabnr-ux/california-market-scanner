@@ -17,6 +17,7 @@ class ScanConfig:
     max_atr_pct: float = 5.0
     min_beta: float = 1.0
     min_rvol: float = 1.5
+    min_gap_pct: float = 2.0
     watchlist_size: int = 15
     minimum_watchlist_size: int = 10
     history_days: int = 90
@@ -30,6 +31,8 @@ class ScanConfig:
             raise ValueError("min_price cannot exceed max_price")
         if self.min_atr_pct > self.max_atr_pct:
             raise ValueError("min_atr_pct cannot exceed max_atr_pct")
+        if self.min_gap_pct < 0:
+            raise ValueError("min_gap_pct cannot be negative")
         if not 1 <= self.watchlist_size <= 15:
             raise ValueError("watchlist_size must be between 1 and 15")
         if not 1 <= self.minimum_watchlist_size <= self.watchlist_size:

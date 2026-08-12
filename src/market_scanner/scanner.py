@@ -27,7 +27,7 @@ def filter_descriptions(config: ScanConfig) -> dict[str, str]:
         "beta": f">{config.min_beta:g} vs SPY (60 sessions)",
         "rvol": f">{config.min_rvol:g}, same premarket time-window",
         "technical_structure": "clean MA trend + clear 20-session levels",
-        "catalyst": "news, upcoming earnings, or ≥2% gap"
+        "catalyst": f"news, upcoming earnings, or ≥{config.min_gap_pct:g}% gap"
         + (" (required)" if config.require_catalyst else " (ranking context)"),
         "watchlist_size": f"up to {config.watchlist_size}; never padded",
     }
@@ -56,7 +56,7 @@ def _evaluate(snapshot: MarketSnapshot, config: ScanConfig) -> Candidate | tuple
     previous_close = snapshot.daily_bars[-1].close
     gap_pct = (price / previous_close - 1) * 100 if previous_close else 0.0
     catalysts = list(snapshot.catalysts)
-    has_gap = abs(gap_pct) >= 2.0
+    has_gap = abs(gap_pct) >= config.min_gap_pct
     if has_gap:
         from market_scanner.models import Catalyst
 

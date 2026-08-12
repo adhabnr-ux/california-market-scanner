@@ -8,6 +8,7 @@ min_atr_pct = 2.0
 max_atr_pct = 5.0
 min_beta = 1.0
 min_rvol = 1.5
+min_gap_pct = 2.0
 
 # Watchlist and calculation controls
 watchlist_size = 15
