@@ -1,0 +1,25 @@
+[scanner]
+min_price = 5.0
+max_price = 150.0
+min_average_volume = 1000000
+max_spread_pct = 0.30
+min_atr_pct = 2.0
+max_atr_pct = 5.0
+min_beta = 1.0
+min_rvol = 1.5
+watchlist_size = 15
+minimum_watchlist_size = 10
+history_days = 90
+level_lookback_days = 20
+risk_per_trade_dollars = 100.0
+reward_to_risk = 2.0
+require_catalyst = true
+
+[provider]
+name = "alpaca"
+feed = "iex"
+request_timeout_seconds = 30
+
+[output]
+directory = "artifacts"
+formats = ["json", "csv", "md", "html"]

@@ -1,0 +1,80 @@
+name: Market scan
+
+on:
+  schedule:
+    # GitHub applies the IANA zone, so this remains 06:00 through PST/PDT changes.
+    - cron: "0 6 * * 1-5"
+      timezone: "America/Los_Angeles"
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Market-data provider"
+        required: true
+        default: "alpaca"
+        type: choice
+        options:
+          - alpaca
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-scan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-and-scan:
+    name: Test and scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MARKET_SCANNER_OUTPUT_DIR: artifacts
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: |
+          ruff check src tests
+          python -m pytest --cov=market_scanner --cov-fail-under=80
+
+      - name: Validate required credentials
+        shell: bash
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+        run: |
+          missing=0
+          for name in APCA_API_KEY_ID APCA_API_SECRET_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required repository secret $name is not configured."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Run market scanner
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: market-scanner scan --provider "${{ inputs.provider || 'alpaca' }}" --output-dir "$MARKET_SCANNER_OUTPUT_DIR"
+
+      - name: Upload watchlist and run metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-scan-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,32 @@
+# Curated liquid US equity starting universe. One symbol per line.
+# The scanner applies every configured gate; inclusion here is never qualification.
+AAPL
+AMD
+AMZN
+AVGO
+BAC
+CCL
+CMCSA
+COIN
+CVNA
+F
+GOOGL
+HOOD
+INTC
+KEY
+MARA
+META
+MSFT
+MU
+NCLH
+NVDA
+ORCL
+PLTR
+RIVN
+SMCI
+SNAP
+SOFI
+T
+TSLA
+UBER
+WBD
