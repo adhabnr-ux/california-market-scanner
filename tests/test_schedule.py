@@ -29,7 +29,7 @@ def test_workflow_tests_scans_and_uploads_artifacts() -> None:
     assert "timeout-minutes: 30" in text
     assert "python -m pytest" in text
     assert "market-scanner scan" in text
-    assert "uses: actions/upload-artifact@v4" in text
+    assert "uses: actions/upload-artifact@v7.0.1" in text
 
 
 def test_credentials_are_scoped_to_steps_not_the_entire_job() -> None:

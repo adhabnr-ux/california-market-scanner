@@ -32,10 +32,10 @@ jobs:
       PYTHONUNBUFFERED: "1"
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -72,7 +72,7 @@ jobs:
 
       - name: Upload watchlist and run metadata
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: market-scan-${{ github.run_id }}
           path: artifacts/
