@@ -22,6 +22,7 @@ def test_workflow_is_manually_dispatchable_and_least_privilege() -> None:
     assert re.search(r"^\s{2}workflow_dispatch:\s*$", text, re.MULTILINE)
     assert re.search(r"^permissions:\n  contents: read$", text, re.MULTILINE)
     assert re.search(r"^  cancel-in-progress: false$", text, re.MULTILINE)
+    assert re.search(r"options:\n\s+- alpaca\n\s+- demo", text)
 
 
 def test_workflow_tests_scans_and_uploads_artifacts() -> None:

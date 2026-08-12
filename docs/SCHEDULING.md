@@ -44,10 +44,12 @@ commit `.env` files or API keys.
 
 ## Manual run
 
-Open **Actions → Market scan → Run workflow**. Or, with GitHub CLI:
+Open **Actions → Market scan → Run workflow**. Choose `demo` to validate the
+complete cloud workflow without credentials, or `alpaca` for live data. With
+GitHub CLI:
 
 ```bash
-gh workflow run market-scan.yml -f provider=alpaca
+gh workflow run market-scan.yml -f provider=demo
 ```
 
 Download output from the completed run's **Artifacts** section.

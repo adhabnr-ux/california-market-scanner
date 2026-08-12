@@ -110,7 +110,8 @@ That remains 06:00 through PST/PDT changes. Add `APCA_API_KEY_ID` and
 `APCA_API_SECRET_KEY` under **Settings → Secrets and variables → Actions**, then
 enable the workflow. GitHub schedules are best-effort and can be delayed or
 dropped under load; [`docs/SCHEDULING.md`](docs/SCHEDULING.md) covers manual
-runs, exact operational limits, Docker, and a local macOS `launchd` alternative.
+runs (including credential-free demo validation), exact operational limits,
+Docker, and a local macOS `launchd` alternative.
 
 ## Quality checks
 
